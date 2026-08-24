@@ -2,12 +2,19 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 from app.database.database import engine
+from app.database.database import Base, engine
+from app.models.user import User
+from app.routers.auth import router as auth_router
 
 app = FastAPI(
     title="MemoraAI API",
     description="AI-Powered Personal Knowledge Intelligence Platform",
     version="0.1.0"
 )
+
+Base.metadata.create_all(bind=engine)
+
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,
