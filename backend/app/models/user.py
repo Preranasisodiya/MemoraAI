@@ -2,6 +2,8 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import relationship
 
 from app.database.database import Base
 
@@ -41,4 +43,9 @@ class User(Base):
         DateTime,
         default=datetime.utcnow,
         nullable=False
+    )
+    documents = relationship(
+    "Document",
+    back_populates="user",
+    cascade="all, delete-orphan"
     )

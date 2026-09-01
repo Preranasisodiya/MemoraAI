@@ -5,6 +5,8 @@ from app.database.database import engine
 from app.database.database import Base, engine
 from app.models.user import User
 from app.routers.auth import router as auth_router
+from app.models.document import Document
+from app.routers.documents import router as documents_router
 
 app = FastAPI(
     title="MemoraAI API",
@@ -15,7 +17,7 @@ app = FastAPI(
 Base.metadata.create_all(bind=engine)
 
 app.include_router(auth_router)
-
+app.include_router(documents_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
