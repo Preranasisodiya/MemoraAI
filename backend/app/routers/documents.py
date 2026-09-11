@@ -1,15 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-from app.database.database import get_db
-from app.models.document import Document
-from app.models.user import User
-from app.schemas.document import DocumentCreate, DocumentResponse
-from app.services.auth_dependency import get_current_user
-from app.services.document_extractor import extract_text
-
 import hashlib
-import shutil
 from pathlib import Path
 
 from fastapi import (
@@ -19,6 +8,17 @@ from fastapi import (
     UploadFile,
     File
 )
+from sqlalchemy.orm import Session
+
+from app.database.database import get_db
+from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
+from app.models.user import User
+from app.schemas.document import DocumentCreate, DocumentResponse
+from app.services.auth_dependency import get_current_user
+from app.services.document_extractor import extract_text
+from app.services.text_chunker import chunk_text
+
 
 router = APIRouter(
     prefix="/api/documents",
@@ -35,7 +35,6 @@ def create_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Create document for the authenticated user
     new_document = Document(
         user_id=current_user.id,
         title=data.title,
@@ -50,20 +49,19 @@ def create_document(
 
     return new_document
 
+
 @router.post("/upload")
 def upload_document(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Allowed file types
     allowed_extensions = {
         ".pdf",
         ".docx",
         ".txt"
     }
 
-    # Make sure filename exists
     if not file.filename:
         raise HTTPException(
             status_code=400,
@@ -72,28 +70,22 @@ def upload_document(
 
     original_filename = file.filename
 
-    # Get file extension
     file_extension = Path(
         original_filename
     ).suffix.lower()
 
-    # Validate file type
     if file_extension not in allowed_extensions:
         raise HTTPException(
             status_code=400,
             detail="Only PDF, DOCX, and TXT files are allowed"
         )
 
-    # Read file contents
     file_contents = file.file.read()
 
-    # Generate SHA-256 hash
     file_hash = hashlib.sha256(
         file_contents
     ).hexdigest()
 
-    # Check whether this exact file already exists
-    # for the current user
     existing_document = (
         db.query(Document)
         .filter(
@@ -109,7 +101,6 @@ def upload_document(
             detail="This file has already been uploaded"
         )
 
-    # Create user-specific upload directory
     upload_directory = Path(
         f"uploads/{current_user.id}"
     )
@@ -119,7 +110,6 @@ def upload_document(
         exist_ok=True
     )
 
-    # Generate unique stored filename
     stored_filename = (
         f"{file_hash}{file_extension}"
     )
@@ -129,18 +119,15 @@ def upload_document(
         stored_filename
     )
 
-    # Save actual uploaded file
     with open(file_path, "wb") as buffer:
         buffer.write(file_contents)
 
-    # Extract text from the saved document
     try:
         extracted_text = extract_text(
             str(file_path),
             file_extension.replace(".", "")
         )
     except Exception as e:
-        # Remove the file if text extraction fails
         if file_path.exists():
             file_path.unlink()
 
@@ -149,7 +136,21 @@ def upload_document(
             detail=f"Failed to extract document text: {str(e)}"
         )
 
-    # Create database record
+    chunks = chunk_text(
+        extracted_text,
+        chunk_size=1000,
+        overlap=200
+    )
+
+    if not chunks:
+        if file_path.exists():
+            file_path.unlink()
+
+        raise HTTPException(
+            status_code=400,
+            detail="No readable text was found in the document"
+        )
+
     new_document = Document(
         user_id=current_user.id,
         title=Path(original_filename).stem,
@@ -161,6 +162,17 @@ def upload_document(
     )
 
     db.add(new_document)
+    db.flush()
+
+    for index, content in enumerate(chunks):
+        document_chunk = DocumentChunk(
+            document_id=new_document.id,
+            chunk_index=index,
+            content=content
+        )
+
+        db.add(document_chunk)
+
     db.commit()
     db.refresh(new_document)
 
@@ -172,5 +184,6 @@ def upload_document(
         "file_type": new_document.file_type,
         "file_path": new_document.file_path,
         "file_hash": new_document.file_hash,
-        "text_length": len(extracted_text)
+        "text_length": len(extracted_text),
+        "chunk_count": len(chunks)
     }

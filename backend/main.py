@@ -7,6 +7,7 @@ from app.models.user import User
 from app.routers.auth import router as auth_router
 from app.models.document import Document
 from app.routers.documents import router as documents_router
+from app.models.document_chunk import DocumentChunk
 
 app = FastAPI(
     title="MemoraAI API",
